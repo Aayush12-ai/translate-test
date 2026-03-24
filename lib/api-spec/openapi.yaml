@@ -1,0 +1,162 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: rooms
+    description: Video call room operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /rooms:
+    post:
+      operationId: createRoom
+      tags: [rooms]
+      summary: Create a new video call room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoomRequest"
+      responses:
+        "201":
+          description: Room created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Room"
+  /rooms/{roomId}:
+    get:
+      operationId: getRoom
+      tags: [rooms]
+      summary: Get room info
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Room found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Room"
+        "404":
+          description: Room not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /rooms/{roomId}/verify:
+    post:
+      operationId: verifyRoomPassword
+      tags: [rooms]
+      summary: Verify room password
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyPasswordRequest"
+      responses:
+        "200":
+          description: Password verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyPasswordResponse"
+        "401":
+          description: Invalid password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Room not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    CreateRoomRequest:
+      type: object
+      properties:
+        hostName:
+          type: string
+      required:
+        - hostName
+    Room:
+      type: object
+      properties:
+        id:
+          type: string
+        hostName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        password:
+          type: string
+          description: Only returned when creating a room (for the host)
+      required:
+        - id
+        - hostName
+        - createdAt
+    VerifyPasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+      required:
+        - password
+    VerifyPasswordResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        token:
+          type: string
+      required:
+        - valid
+        - token
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

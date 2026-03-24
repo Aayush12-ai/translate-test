@@ -1,0 +1,14 @@
+packages:
+  "framer-motion": "For smooth page transitions and micro-interactions"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility for merging tailwind classes without style conflicts"
+
+images:
+  - path: "artifacts/video-call/public/images/dark-mesh-bg.png"
+    description: "A dark, premium abstract gradient mesh background with deep indigo, black, and subtle electric blue light leaks, professional and clean"
+    aspect_ratio: "16:9"
+
+notes:
+  - WebRTC signaling server connects to relative `/ws` path via WebSocket
+  - Using generated hooks from `@workspace/api-client-react` for REST calls
+  - Video call uses standard STUN servers for ICE negotiation
