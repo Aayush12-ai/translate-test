@@ -36,21 +36,41 @@ async function translateText(
 ): Promise<string> {
   if (sourceLang === targetLang) return text;
 
-  const langpair = `${sourceLang}|${targetLang}`;
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(langpair)}`;
+  const apiKey = process.env["GOOGLE_TRANSLATE_API_KEY"];
+  if (!apiKey) {
+    logger.warn("GOOGLE_TRANSLATE_API_KEY not set — returning original text");
+    return text;
+  }
+
+  const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
 
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) throw new Error(`MyMemory returned ${res.status}`);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        q: text,
+        source: sourceLang,
+        target: targetLang,
+        format: "text",
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Google Translate error ${res.status}: ${body}`);
+    }
+
     const json = (await res.json()) as {
-      responseData?: { translatedText?: string };
-      responseStatus?: number;
+      data?: { translations?: { translatedText?: string }[] };
     };
-    const translated = json.responseData?.translatedText;
-    if (!translated) throw new Error("No translation returned");
+
+    const translated = json.data?.translations?.[0]?.translatedText;
+    if (!translated) throw new Error("No translation in response");
     return translated;
   } catch (err) {
-    logger.warn({ err, text, sourceLang, targetLang }, "Translation failed, using original");
+    logger.warn({ err, sourceLang, targetLang }, "Translation failed, returning original");
     return text;
   }
 }
