@@ -12,10 +12,37 @@ import {
   MonitorX,
   Check,
   X,
+  Captions,
+  CaptionsOff,
 } from "lucide-react";
 import { useWebRTC } from "@/hooks/use-webrtc";
+import { useTranscription } from "@/hooks/use-transcription";
 import { VideoPlayer } from "@/components/video-player";
 import { motion, AnimatePresence } from "framer-motion";
+
+interface Language {
+  code: string;
+  speechCode: string;
+  label: string;
+}
+
+const LANGUAGES: Language[] = [
+  { code: "en", speechCode: "en-US", label: "English" },
+  { code: "es", speechCode: "es-ES", label: "Spanish" },
+  { code: "fr", speechCode: "fr-FR", label: "French" },
+  { code: "de", speechCode: "de-DE", label: "German" },
+  { code: "it", speechCode: "it-IT", label: "Italian" },
+  { code: "pt", speechCode: "pt-PT", label: "Portuguese" },
+  { code: "ru", speechCode: "ru-RU", label: "Russian" },
+  { code: "zh", speechCode: "zh-CN", label: "Chinese" },
+  { code: "ja", speechCode: "ja-JP", label: "Japanese" },
+  { code: "ko", speechCode: "ko-KR", label: "Korean" },
+  { code: "ar", speechCode: "ar-SA", label: "Arabic" },
+  { code: "hi", speechCode: "hi-IN", label: "Hindi" },
+  { code: "nl", speechCode: "nl-NL", label: "Dutch" },
+  { code: "pl", speechCode: "pl-PL", label: "Polish" },
+  { code: "tr", speechCode: "tr-TR", label: "Turkish" },
+];
 
 export function Call() {
   const params = useParams();
@@ -25,6 +52,13 @@ export function Call() {
   const [token, setToken] = useState("");
   const [name, setName] = useState("");
   const [attempt, setAttempt] = useState(0);
+
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(false);
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const [sourceLangCode, setSourceLangCode] = useState("en");
+  const [targetLangCode, setTargetLangCode] = useState("es");
+
+  const sourceLang = LANGUAGES.find((l) => l.code === sourceLangCode) ?? LANGUAGES[0];
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -62,6 +96,15 @@ export function Call() {
     denyScreenShare,
   } = useWebRTC(roomId, token, name, attempt);
 
+  const { subtitles, isListening, error: transcriptionError } = useTranscription({
+    roomId,
+    name,
+    enabled: subtitlesEnabled && !!token && !!name,
+    sourceLang: sourceLangCode,
+    targetLang: targetLangCode,
+    speechLang: sourceLang.speechCode,
+  });
+
   if (!token || !name) return null;
 
   if (error) {
@@ -92,6 +135,7 @@ export function Call() {
 
   return (
     <div className="h-screen w-full bg-black flex flex-col overflow-hidden">
+      {/* Screen share request banner */}
       <AnimatePresence>
         {screenShareRequest && (
           <motion.div
@@ -105,9 +149,7 @@ export function Call() {
               <p className="truncate text-sm font-semibold text-white">
                 {screenShareRequest.name} wants to share their screen
               </p>
-              <p className="mt-0.5 text-xs text-zinc-400">
-                Allow screen sharing?
-              </p>
+              <p className="mt-0.5 text-xs text-zinc-400">Allow screen sharing?</p>
             </div>
             <div className="flex shrink-0 gap-2">
               <button
@@ -129,6 +171,7 @@ export function Call() {
         )}
       </AnimatePresence>
 
+      {/* Screen share pending / denied banner */}
       <AnimatePresence>
         {(screenShareRequestPending || screenShareDenied) && (
           <motion.div
@@ -149,15 +192,14 @@ export function Call() {
             ) : (
               <>
                 <Monitor className="h-5 w-5 shrink-0 animate-pulse text-blue-400" />
-                <p className="text-sm text-white">
-                  Waiting for host to approve...
-                </p>
+                <p className="text-sm text-white">Waiting for host to approve...</p>
               </>
             )}
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* Video area */}
       <div className="relative flex-1 min-h-0 p-3">
         {mediaError && (
           <div className="absolute left-3 right-3 top-3 z-20 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 backdrop-blur-md md:left-6 md:right-auto md:max-w-md">
@@ -204,6 +246,7 @@ export function Call() {
           )}
         </div>
 
+        {/* Local video pip */}
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -224,73 +267,156 @@ export function Call() {
           )}
         </motion.div>
 
+        {/* Connected badge */}
         {isConnected && (
           <div className="absolute left-6 top-6 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-1.5 backdrop-blur-md">
             <div className="h-2 w-2 animate-pulse rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
-            <span className="text-xs font-medium tracking-wide text-white/80">
-              CONNECTED
-            </span>
+            <span className="text-xs font-medium tracking-wide text-white/80">CONNECTED</span>
           </div>
         )}
+
+        {/* Listening badge */}
+        {subtitlesEnabled && isListening && (
+          <div className="absolute left-6 top-16 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-1.5 backdrop-blur-md">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400 shadow-[0_0_8px_#60a5fa]" />
+            <span className="text-xs font-medium tracking-wide text-white/70">LISTENING</span>
+          </div>
+        )}
+
+        {/* Transcription error */}
+        {subtitlesEnabled && transcriptionError && (
+          <div className="absolute left-6 top-28 rounded-xl border border-amber-500/20 bg-black/70 px-4 py-2 text-xs text-amber-300 backdrop-blur-md max-w-xs">
+            {transcriptionError}
+          </div>
+        )}
+
+        {/* Subtitle overlay */}
+        <AnimatePresence>
+          {subtitlesEnabled && subtitles.length > 0 && (
+            <div className="absolute inset-x-4 bottom-4 z-20 flex flex-col gap-1.5 items-center pointer-events-none">
+              {subtitles.map((sub) => (
+                <motion.div
+                  key={sub.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="max-w-2xl w-full"
+                >
+                  <div className="rounded-xl bg-black/80 px-4 py-2 backdrop-blur-md text-center shadow-lg">
+                    <span className="text-xs font-semibold text-blue-400 mr-2">{sub.name}:</span>
+                    <span className="text-sm font-medium text-white">{sub.translated}</span>
+                    {sub.original !== sub.translated && (
+                      <span className="ml-2 text-xs text-white/35 italic">({sub.original})</span>
+                    )}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </AnimatePresence>
       </div>
 
+      {/* Language picker panel */}
+      <AnimatePresence>
+        {subtitlesEnabled && showLangPicker && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="shrink-0 overflow-hidden border-t border-white/5 bg-zinc-900/95 backdrop-blur-sm"
+          >
+            <div className="flex items-center justify-center gap-4 flex-wrap px-6 py-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-white/50 uppercase tracking-wider whitespace-nowrap">I speak</span>
+                <select
+                  value={sourceLangCode}
+                  onChange={(e) => setSourceLangCode(e.target.value)}
+                  className="bg-zinc-800 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
+              <span className="text-white/30 text-lg">→</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-white/50 uppercase tracking-wider whitespace-nowrap">Translate to</span>
+                <select
+                  value={targetLangCode}
+                  onChange={(e) => setTargetLangCode(e.target.value)}
+                  className="bg-zinc-800 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>{l.label}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => { setSubtitlesEnabled(false); setShowLangPicker(false); }}
+                className="ml-2 text-xs text-white/40 hover:text-white/70 transition-colors"
+              >
+                Turn off
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Control bar */}
       <div className="shrink-0 border-t border-white/5 bg-black/80 px-6 py-4 backdrop-blur-sm">
         <div className="flex items-center justify-center gap-3 md:gap-4">
           <button
             onClick={toggleMute}
             className={`flex h-12 w-12 items-center justify-center rounded-full transition-all md:h-14 md:w-14 ${
-              isMuted
-                ? "bg-destructive text-white"
-                : "bg-white/10 text-white hover:bg-white/20"
+              isMuted ? "bg-destructive text-white" : "bg-white/10 text-white hover:bg-white/20"
             }`}
             title={isMuted ? "Unmute" : "Mute"}
           >
-            {isMuted ? (
-              <MicOff className="h-5 w-5 md:h-6 md:w-6" />
-            ) : (
-              <Mic className="h-5 w-5 md:h-6 md:w-6" />
-            )}
+            {isMuted ? <MicOff className="h-5 w-5 md:h-6 md:w-6" /> : <Mic className="h-5 w-5 md:h-6 md:w-6" />}
           </button>
 
           <button
             onClick={toggleVideo}
             className={`flex h-12 w-12 items-center justify-center rounded-full transition-all md:h-14 md:w-14 ${
-              isVideoOff
-                ? "bg-destructive text-white"
-                : "bg-white/10 text-white hover:bg-white/20"
+              isVideoOff ? "bg-destructive text-white" : "bg-white/10 text-white hover:bg-white/20"
             }`}
             title={isVideoOff ? "Turn on camera" : "Turn off camera"}
           >
-            {isVideoOff ? (
-              <VideoOff className="h-5 w-5 md:h-6 md:w-6" />
-            ) : (
-              <VideoIcon className="h-5 w-5 md:h-6 md:w-6" />
-            )}
+            {isVideoOff ? <VideoOff className="h-5 w-5 md:h-6 md:w-6" /> : <VideoIcon className="h-5 w-5 md:h-6 md:w-6" />}
           </button>
 
           <button
             onClick={isScreenSharing ? stopScreenShare : startScreenShare}
             disabled={screenShareRequestPending}
             className={`flex h-12 w-12 items-center justify-center rounded-full transition-all disabled:cursor-not-allowed disabled:opacity-50 md:h-14 md:w-14 ${
-              isScreenSharing
-                ? "bg-blue-600 text-white hover:bg-blue-500"
-                : "bg-white/10 text-white hover:bg-white/20"
+              isScreenSharing ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-white/10 text-white hover:bg-white/20"
             }`}
             title={
-              isScreenSharing
-                ? "Stop sharing"
-                : isHost
-                  ? "Share screen"
-                  : screenShareRequestPending
-                    ? "Waiting for approval..."
-                    : "Request screen share"
+              isScreenSharing ? "Stop sharing"
+                : isHost ? "Share screen"
+                : screenShareRequestPending ? "Waiting for approval..."
+                : "Request screen share"
             }
           >
-            {isScreenSharing ? (
-              <MonitorOff className="h-5 w-5 md:h-6 md:w-6" />
-            ) : (
-              <Monitor className="h-5 w-5 md:h-6 md:w-6" />
-            )}
+            {isScreenSharing ? <MonitorOff className="h-5 w-5 md:h-6 md:w-6" /> : <Monitor className="h-5 w-5 md:h-6 md:w-6" />}
+          </button>
+
+          {/* Subtitles / CC button */}
+          <button
+            onClick={() => {
+              if (!subtitlesEnabled) {
+                setSubtitlesEnabled(true);
+                setShowLangPicker(true);
+              } else {
+                setShowLangPicker((v) => !v);
+              }
+            }}
+            className={`flex h-12 w-12 items-center justify-center rounded-full transition-all md:h-14 md:w-14 ${
+              subtitlesEnabled ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-white/10 text-white hover:bg-white/20"
+            }`}
+            title={subtitlesEnabled ? "Subtitles on — click to change languages" : "Turn on live subtitles"}
+          >
+            {subtitlesEnabled ? <Captions className="h-5 w-5 md:h-6 md:w-6" /> : <CaptionsOff className="h-5 w-5 md:h-6 md:w-6" />}
           </button>
 
           <div className="h-8 w-px bg-white/10" />

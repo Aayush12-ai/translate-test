@@ -29,6 +29,9 @@ function send(ws: WebSocket, data: object) {
   }
 }
 
+const LIBRETRANSLATE_URL =
+  process.env["LIBRETRANSLATE_URL"] ?? "https://translate.argosopentech.com";
+
 async function translateText(
   text: string,
   sourceLang: string,
@@ -36,16 +39,8 @@ async function translateText(
 ): Promise<string> {
   if (sourceLang === targetLang) return text;
 
-  const apiKey = process.env["GOOGLE_TRANSLATE_API_KEY"];
-  if (!apiKey) {
-    logger.warn("GOOGLE_TRANSLATE_API_KEY not set — returning original text");
-    return text;
-  }
-
-  const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
-
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`${LIBRETRANSLATE_URL}/translate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -53,22 +48,20 @@ async function translateText(
         source: sourceLang,
         target: targetLang,
         format: "text",
+        api_key: process.env["LIBRETRANSLATE_API_KEY"] ?? "",
       }),
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(7000),
     });
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`Google Translate error ${res.status}: ${body}`);
+      throw new Error(`LibreTranslate ${res.status}: ${body}`);
     }
 
-    const json = (await res.json()) as {
-      data?: { translations?: { translatedText?: string }[] };
-    };
-
-    const translated = json.data?.translations?.[0]?.translatedText;
-    if (!translated) throw new Error("No translation in response");
-    return translated;
+    const json = (await res.json()) as { translatedText?: string; error?: string };
+    if (json.error) throw new Error(json.error);
+    if (!json.translatedText) throw new Error("No translatedText in response");
+    return json.translatedText;
   } catch (err) {
     logger.warn({ err, sourceLang, targetLang }, "Translation failed, returning original");
     return text;
@@ -135,5 +128,5 @@ export function setupTranscription(server: Server) {
     });
   });
 
-  logger.info("Transcription WebSocket ready at /ws/transcribe");
+  logger.info({ url: LIBRETRANSLATE_URL }, "Transcription WebSocket ready at /ws/transcribe");
 }

@@ -53,6 +53,23 @@ bash /home/runner/workspace/start.sh
 - Screen sharing with host-approval flow
 - Password-protected rooms
 - Real-time WebSocket signaling
+- **Live subtitles with translation** — browser Web Speech API (Google STT engine) + LibreTranslate for translation, relayed via `/ws/transcribe` WebSocket to all room participants
+
+## Subtitles / Translation Pipeline
+
+```
+Browser mic → Web Speech API (Google STT, free)
+  → Final transcript → WebSocket /ws/transcribe
+  → Backend: LibreTranslate (free, https://translate.argosopentech.com)
+  → Translated subtitle → broadcast to all room peers
+  → Subtitle overlay rendered on call page
+```
+
+- **No API key required** — uses a free public LibreTranslate mirror
+- To use a self-hosted instance: set `LIBRETRANSLATE_URL` env var
+- To use an instance requiring a key: set `LIBRETRANSLATE_API_KEY` env var
+- Speech recognition works in Chrome and Edge (Web Speech API)
+- 15 supported languages: EN, ES, FR, DE, IT, PT, RU, ZH, JA, KO, AR, HI, NL, PL, TR
 
 ## Development Notes
 

@@ -2,6 +2,7 @@ import http from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { setupSignaling } from "./signaling";
+import { setupTranscription } from "./transcription";
 
 const rawPort = process.env["PORT"] ?? "8080";
 
@@ -13,6 +14,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 const server = http.createServer(app);
 setupSignaling(server);
+setupTranscription(server);
 
 server.listen(port, (err?: Error) => {
   if (err) {
