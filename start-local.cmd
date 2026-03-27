@@ -16,7 +16,7 @@ if defined API_PORT (
     exit /b 1
   )
 ) else (
-  call :choose_port API_PORT 8080 18080 3001 5001
+  call :choose_port API_PORT 18080 8080 3001 5001
   if errorlevel 1 exit /b 1
 )
 

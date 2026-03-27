@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, roomsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { CreateRoomBody, GetRoomParams, VerifyRoomPasswordParams, VerifyRoomPasswordBody } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
@@ -15,9 +15,35 @@ type StoredRoom = {
 };
 
 const inMemoryRooms = new Map<string, StoredRoom>();
+let ensureRoomsTablePromise: Promise<void> | null = null;
 
 if (!db) {
   logger.warn("DATABASE_URL is not set; using in-memory room storage");
+}
+
+async function ensureRoomsTableExists() {
+  if (!db) {
+    return;
+  }
+
+  if (!ensureRoomsTablePromise) {
+    ensureRoomsTablePromise = db
+      .execute(sql`
+        CREATE TABLE IF NOT EXISTS rooms (
+          id text PRIMARY KEY,
+          host_name text NOT NULL,
+          password text NOT NULL,
+          created_at timestamp NOT NULL DEFAULT now()
+        )
+      `)
+      .then(() => undefined)
+      .catch((err) => {
+        ensureRoomsTablePromise = null;
+        throw err;
+      });
+  }
+
+  await ensureRoomsTablePromise;
 }
 
 function generatePassword(): string {
@@ -31,6 +57,7 @@ function generatePassword(): string {
 
 async function createRoomRecord(id: string, hostName: string, password: string): Promise<StoredRoom> {
   if (db) {
+    await ensureRoomsTableExists();
     await db.insert(roomsTable).values({ id, hostName, password });
 
     const room = await db.select().from(roomsTable).where(eq(roomsTable.id, id)).limit(1);
@@ -50,6 +77,7 @@ async function createRoomRecord(id: string, hostName: string, password: string):
 
 async function getRoomRecord(roomId: string): Promise<StoredRoom | null> {
   if (db) {
+    await ensureRoomsTableExists();
     const room = await db
       .select()
       .from(roomsTable)

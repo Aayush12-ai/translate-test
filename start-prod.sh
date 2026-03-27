@@ -2,9 +2,9 @@
 set -e
 
 # Start the API server in background
-echo "Starting API server on port 8080..."
+echo "Starting API server on port 18080..."
 cd /home/runner/workspace/artifacts/api-server
-PORT=8080 node --enable-source-maps ./dist/index.mjs &
+PORT=18080 node --enable-source-maps ./dist/index.mjs &
 API_PID=$!
 
 # Serve the built frontend with vite preview

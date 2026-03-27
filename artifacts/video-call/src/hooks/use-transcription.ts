@@ -1,23 +1,37 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { resolveApiWebSocketCandidates } from "@/lib/utils";
+
+const TRANSCRIPTION_ACK_TIMEOUT_MS = 5_000;
+const TRANSCRIPTION_RECONNECT_DELAY_MS = 1_500;
+const TRANSCRIPTION_JOIN_RETRY_MS = 1_000;
+
+export type TranslationStatus =
+  | "translated"
+  | "same-language"
+  | "service-unavailable"
+  | "translation-error";
 
 export interface Subtitle {
   id: number;
   name: string;
   original: string;
   translated: string;
+  translationStatus: TranslationStatus;
+  translationNote?: string;
   ts: number;
 }
 
 interface UseTranscriptionOptions {
   roomId: string;
   name: string;
+  participantKey: string;
   enabled: boolean;
   sourceLang: string;
   targetLang: string;
   speechLang: string;
 }
 
-const SUBTITLE_TTL_MS = 6000;
+const MAX_SUBTITLE_HISTORY = 40;
 let subtitleIdCounter = 0;
 
 declare global {
@@ -30,6 +44,7 @@ declare global {
 export function useTranscription({
   roomId,
   name,
+  participantKey,
   enabled,
   sourceLang,
   targetLang,
@@ -38,70 +53,225 @@ export function useTranscription({
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSocketReady, setIsSocketReady] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const cleanupTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const targetLangRef = useRef(targetLang);
+  const languagePairRef = useRef<string | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   const addSubtitle = useCallback((subtitle: Omit<Subtitle, "id">) => {
     const id = ++subtitleIdCounter;
-    setSubtitles((prev) => [...prev.slice(-4), { ...subtitle, id }]);
+    setSubtitles((prev) => [...prev.slice(-(MAX_SUBTITLE_HISTORY - 1)), { ...subtitle, id }]);
   }, []);
 
   useEffect(() => {
-    if (!enabled) return;
-    cleanupTimerRef.current = setInterval(() => {
-      const cutoff = Date.now() - SUBTITLE_TTL_MS;
-      setSubtitles((prev) => prev.filter((s) => s.ts > cutoff));
-    }, 1000);
-    return () => {
-      if (cleanupTimerRef.current) clearInterval(cleanupTimerRef.current);
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled || !roomId || !name) {
-      wsRef.current?.close();
-      wsRef.current = null;
-      return;
-    }
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/transcribe`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "join", roomId, name }));
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data as string);
-        if (msg.type === "subtitle") {
-          addSubtitle({
-            name: msg.name as string,
-            original: msg.original as string,
-            translated: msg.translated as string,
-            ts: Date.now(),
-          });
-        }
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    ws.onerror = () => {
-      setError("Subtitle connection failed");
-    };
-
-    return () => {
-      ws.close();
-      wsRef.current = null;
-    };
-  }, [enabled, roomId, name, addSubtitle]);
+    targetLangRef.current = targetLang;
+  }, [targetLang]);
 
   useEffect(() => {
     if (!enabled) {
+      languagePairRef.current = null;
+      return;
+    }
+
+    const nextLanguagePair = `${sourceLang}->${targetLang}`;
+
+    if (languagePairRef.current && languagePairRef.current !== nextLanguagePair) {
+      setSubtitles([]);
+    }
+
+    languagePairRef.current = nextLanguagePair;
+  }, [enabled, sourceLang, targetLang]);
+
+  useEffect(() => {
+    if (!enabled || !roomId || !name || !participantKey) {
+      wsRef.current?.close();
+      wsRef.current = null;
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      setSubtitles([]);
+      setError(null);
+      setIsSocketReady(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const connectSocket = (socketCandidates: string[], candidateIndex = 0) => {
+      const socketUrl = socketCandidates[candidateIndex];
+
+      if (!socketUrl) {
+        setError("Subtitle connection failed");
+        return;
+      }
+
+      let opened = false;
+      let joined = false;
+      const ws = new WebSocket(socketUrl);
+      wsRef.current = ws;
+      setIsSocketReady(false);
+      let joinRetryTimer: number | null = null;
+      const sendJoin = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "join",
+              roomId,
+              name,
+              participantKey,
+              targetLang: targetLangRef.current,
+            }),
+          );
+        }
+      };
+      const clearJoinRetryTimer = () => {
+        if (joinRetryTimer !== null) {
+          window.clearTimeout(joinRetryTimer);
+          joinRetryTimer = null;
+        }
+      };
+      const ackTimer = window.setTimeout(() => {
+        if (!joined && ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      }, TRANSCRIPTION_ACK_TIMEOUT_MS);
+
+      ws.onopen = () => {
+        if (wsRef.current !== ws) {
+          ws.close();
+          return;
+        }
+
+        opened = true;
+        if (reconnectTimerRef.current !== null) {
+          window.clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = null;
+        }
+        sendJoin();
+
+        const scheduleJoinRetry = () => {
+          clearJoinRetryTimer();
+          joinRetryTimer = window.setTimeout(() => {
+            if (joined || cancelled || ws.readyState !== WebSocket.OPEN) {
+              clearJoinRetryTimer();
+              return;
+            }
+
+            sendJoin();
+            scheduleJoinRetry();
+          }, TRANSCRIPTION_JOIN_RETRY_MS);
+        };
+
+        scheduleJoinRetry();
+      };
+
+      ws.onmessage = (event) => {
+        if (wsRef.current !== ws) {
+          return;
+        }
+
+        try {
+          const msg = JSON.parse(event.data as string);
+          if (msg.type === "joined") {
+            joined = true;
+            window.clearTimeout(ackTimer);
+            clearJoinRetryTimer();
+            setIsSocketReady(true);
+            setError(null);
+            return;
+          }
+          if (msg.type === "subtitle") {
+            addSubtitle({
+              name: msg.name as string,
+              original: msg.original as string,
+              translated: msg.translated as string,
+              translationStatus: (msg.translationStatus as TranslationStatus) ?? "translated",
+              translationNote:
+                typeof msg.translationNote === "string" ? msg.translationNote : undefined,
+              ts: typeof msg.ts === "number" ? msg.ts : Date.now(),
+            });
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onerror = () => {
+        if (wsRef.current !== ws) {
+          return;
+        }
+
+        if (!opened || !joined) {
+          return;
+        }
+
+        setError("Subtitle connection failed");
+      };
+
+      ws.onclose = () => {
+        window.clearTimeout(ackTimer);
+        clearJoinRetryTimer();
+
+        if (wsRef.current !== ws) {
+          return;
+        }
+
+        wsRef.current = null;
+        setIsSocketReady(false);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!opened || !joined) {
+          connectSocket(socketCandidates, candidateIndex + 1);
+          return;
+        }
+
+        setError("Subtitle connection lost. Reconnecting...");
+        reconnectTimerRef.current = window.setTimeout(() => {
+          connectSocket(socketCandidates, 0);
+        }, TRANSCRIPTION_RECONNECT_DELAY_MS);
+      };
+    };
+
+    void resolveApiWebSocketCandidates("/ws/transcribe").then((socketCandidates) => {
+      if (cancelled) {
+        return;
+      }
+
+      connectSocket(socketCandidates);
+    });
+
+    return () => {
+      cancelled = true;
+      wsRef.current?.close();
+      wsRef.current = null;
+      setIsSocketReady(false);
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [enabled, roomId, name, participantKey, addSubtitle]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "settings", targetLang }));
+    }
+  }, [enabled, targetLang]);
+
+  useEffect(() => {
+    if (!enabled || !isSocketReady) {
       recognitionRef.current?.stop();
       recognitionRef.current = null;
       setIsListening(false);
@@ -149,7 +319,7 @@ export function useTranscription({
           if (!text) continue;
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "transcript", text, sourceLang, targetLang }));
+            ws.send(JSON.stringify({ type: "transcript", text, sourceLang }));
           }
         }
       }
@@ -167,7 +337,7 @@ export function useTranscription({
       recognitionRef.current = null;
       setIsListening(false);
     };
-  }, [enabled, speechLang, sourceLang, targetLang]);
+  }, [enabled, isSocketReady, speechLang, sourceLang]);
 
   const clearSubtitles = useCallback(() => setSubtitles([]), []);
 
