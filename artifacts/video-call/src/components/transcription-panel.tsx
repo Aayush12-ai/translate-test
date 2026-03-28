@@ -10,12 +10,14 @@ interface LanguageOption {
 interface TranscriptionPanelProps {
   subtitles: Subtitle[];
   isListening: boolean;
+  micEnabled: boolean;
   error: string | null;
   sourceLangCode: string;
   targetLangCode: string;
   languages: LanguageOption[];
   onSourceLangChange: (code: string) => void;
   onTargetLangChange: (code: string) => void;
+  onToggleMic: () => void;
   onDisable: () => void;
 }
 
@@ -29,12 +31,14 @@ function formatTimestamp(ts: number) {
 export function TranscriptionPanel({
   subtitles,
   isListening,
+  micEnabled,
   error,
   sourceLangCode,
   targetLangCode,
   languages,
   onSourceLangChange,
   onTargetLangChange,
+  onToggleMic,
   onDisable,
 }: TranscriptionPanelProps) {
   const transcriptListRef = useRef<HTMLDivElement | null>(null);
@@ -142,17 +146,33 @@ export function TranscriptionPanel({
           </p>
 
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <div
-              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 ${
-                isListening ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+            <button
+              onClick={onToggleMic}
+              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 font-medium transition-colors ${
+                micEnabled
+                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              {isListening ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-              <span>{isListening ? "Your speech is being captured" : "Mic transcription is paused"}</span>
+              {micEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+              <span>
+                {isListening
+                  ? "Mic is live"
+                  : micEnabled
+                    ? "Starting mic..."
+                    : "Tap mic to speak"}
+              </span>
+            </button>
+            <div className="min-w-0 text-xs text-slate-400">
+              <p>
+                {micEnabled
+                  ? "Your speech will be translated for other people in the call."
+                  : "You can receive translated subtitles without turning on your mic."}
+              </p>
+              <p className="mt-1">
+                Anyone else who has their translation mic enabled can still appear here.
+              </p>
             </div>
-            <p className="text-xs text-slate-400">
-              Anyone who has transcription enabled, including you, can appear here.
-            </p>
           </div>
 
           {error && (

@@ -141,6 +141,7 @@ export function Call() {
   const [attempt, setAttempt] = useState(0);
   const [transcriptionEnabled, setTranscriptionEnabled] = useState(initialTranscriptionEnabled);
   const [subtitlesPanelOpen, setSubtitlesPanelOpen] = useState(false);
+  const [transcriptionMicEnabled, setTranscriptionMicEnabled] = useState(false);
   const [sourceLangCode, setSourceLangCode] = useState(initialSourceLangCode);
   const [targetLangCode, setTargetLangCode] = useState(initialTargetLangCode);
 
@@ -214,7 +215,8 @@ export function Call() {
     roomId,
     name,
     participantKey: token,
-    enabled: transcriptionEnabled && (!!localStream || !!mediaError) && !!token && !!name,
+    enabled: transcriptionEnabled && subtitlesPanelOpen && !!token && !!name,
+    captureEnabled: transcriptionMicEnabled,
     sourceLang: sourceLangCode,
     targetLang: targetLangCode,
     speechLang: sourceLang.speechCode,
@@ -223,6 +225,7 @@ export function Call() {
   const disableTranscription = () => {
     setTranscriptionEnabled(false);
     setSubtitlesPanelOpen(false);
+    setTranscriptionMicEnabled(false);
     clearSubtitles();
   };
 
@@ -230,10 +233,19 @@ export function Call() {
     if (!transcriptionEnabled) {
       setTranscriptionEnabled(true);
       setSubtitlesPanelOpen(true);
+      setTranscriptionMicEnabled(false);
       return;
     }
 
-    setSubtitlesPanelOpen((value) => !value);
+    setSubtitlesPanelOpen((value) => {
+      const nextValue = !value;
+
+      if (!nextValue) {
+        setTranscriptionMicEnabled(false);
+      }
+
+      return nextValue;
+    });
   };
 
   if (!token || !name) return null;
@@ -391,12 +403,14 @@ export function Call() {
                 <TranscriptionPanel
                   subtitles={subtitles}
                   isListening={isListening}
+                  micEnabled={transcriptionMicEnabled}
                   error={transcriptionError}
                   sourceLangCode={sourceLangCode}
                   targetLangCode={targetLangCode}
                   languages={LANGUAGES}
                   onSourceLangChange={setSourceLangCode}
                   onTargetLangChange={setTargetLangCode}
+                  onToggleMic={() => setTranscriptionMicEnabled((value) => !value)}
                   onDisable={disableTranscription}
                 />
               </motion.aside>

@@ -23,6 +23,7 @@ interface TranslationResult {
 
 const rooms = new Map<string, TranscribeClient[]>();
 const DEFAULT_AZURE_TRANSLATOR_ENDPOINT = "https://api.cognitive.microsofttranslator.com";
+const MYMEMORY_TRANSLATE_URL = "https://api.mymemory.translated.net/get";
 const HEARTBEAT_INTERVAL_MS = 25_000;
 
 function getRoom(roomId: string): TranscribeClient[] {
@@ -65,6 +66,8 @@ const AZURE_TRANSLATOR_ENDPOINT =
 const AZURE_TRANSLATOR_REGION = process.env["AZURE_TRANSLATOR_REGION"]?.trim() ?? "";
 const AZURE_TRANSLATOR_CATEGORY = process.env["AZURE_TRANSLATOR_CATEGORY"]?.trim() ?? "";
 
+type TranslationProvider = "azure" | "libretranslate" | "mymemory";
+
 interface AzureTranslationResponseItem {
   translations?: Array<{
     text?: string;
@@ -76,21 +79,100 @@ interface AzureTranslationResponseItem {
   };
 }
 
-function normalizeAzureLanguageCode(language: string): string {
-  const normalized = language.trim().toLowerCase();
+interface MyMemoryTranslationResponse {
+  responseData?: {
+    translatedText?: string;
+  };
+  responseDetails?: string;
+  responseStatus?: number;
+}
+
+function normalizeLanguageTag(language: string): string {
+  return language.trim().replace(/_/g, "-").toLowerCase();
+}
+
+function normalizeLanguageForComparison(language: string): string {
+  const normalized = normalizeLanguageTag(language);
+
+  if (!normalized) {
+    return "";
+  }
 
   switch (normalized) {
     case "zh":
     case "zh-cn":
     case "zh-sg":
-      return "zh-Hans";
+    case "zh-hans":
+      return "zh-hans";
     case "zh-tw":
     case "zh-hk":
     case "zh-mo":
+    case "zh-hant":
+      return "zh-hant";
+    default:
+      return normalized.split("-")[0] ?? normalized;
+  }
+}
+
+function normalizeAzureLanguageCode(language: string): string {
+  const normalized = normalizeLanguageForComparison(language);
+
+  switch (normalized) {
+    case "zh-hans":
+      return "zh-Hans";
+    case "zh-hant":
       return "zh-Hant";
     default:
       return normalized;
   }
+}
+
+function normalizeLibreTranslateLanguageCode(language: string): string {
+  const normalized = normalizeLanguageForComparison(language);
+
+  switch (normalized) {
+    case "zh-hans":
+    case "zh-hant":
+      return "zh";
+    default:
+      return normalized;
+  }
+}
+
+function normalizeMyMemoryLanguageCode(language: string): string {
+  const normalized = normalizeLanguageForComparison(language);
+
+  switch (normalized) {
+    case "zh-hans":
+      return "zh-CN";
+    case "zh-hant":
+      return "zh-TW";
+    default:
+      return normalized;
+  }
+}
+
+function isSameLanguage(sourceLang: string, targetLang: string): boolean {
+  const normalizedSourceLang = normalizeLanguageForComparison(sourceLang);
+  const normalizedTargetLang = normalizeLanguageForComparison(targetLang);
+
+  return Boolean(normalizedSourceLang) && normalizedSourceLang === normalizedTargetLang;
+}
+
+function getTranslationCacheKey(language: string): string {
+  return normalizeLanguageForComparison(language) || normalizeLanguageTag(language) || "en";
+}
+
+function getActiveTranslationProvider(): TranslationProvider {
+  if (AZURE_TRANSLATOR_KEY) {
+    return "azure";
+  }
+
+  if (LIBRETRANSLATE_URL) {
+    return "libretranslate";
+  }
+
+  return "mymemory";
 }
 
 function buildAzureTranslateUrl(sourceLang: string, targetLang: string): URL {
@@ -129,7 +211,7 @@ async function translateWithAzure(
   const normalizedSourceLang = normalizeAzureLanguageCode(sourceLang);
   const normalizedTargetLang = normalizeAzureLanguageCode(targetLang);
 
-  if (normalizedSourceLang === normalizedTargetLang) {
+  if (isSameLanguage(sourceLang, targetLang)) {
     return {
       translatedText: text,
       status: "same-language",
@@ -196,7 +278,10 @@ async function translateWithLibreTranslate(
   sourceLang: string,
   targetLang: string,
 ): Promise<TranslationResult> {
-  if (sourceLang === targetLang) {
+  const normalizedSourceLang = normalizeLibreTranslateLanguageCode(sourceLang);
+  const normalizedTargetLang = normalizeLibreTranslateLanguageCode(targetLang);
+
+  if (isSameLanguage(sourceLang, targetLang)) {
     return {
       translatedText: text,
       status: "same-language",
@@ -218,8 +303,8 @@ async function translateWithLibreTranslate(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         q: text,
-        source: sourceLang,
-        target: targetLang,
+        source: normalizedSourceLang,
+        target: normalizedTargetLang,
         format: "text",
         api_key: LIBRETRANSLATE_API_KEY,
       }),
@@ -251,16 +336,88 @@ async function translateWithLibreTranslate(
   }
 }
 
+async function translateWithMyMemory(
+  text: string,
+  sourceLang: string,
+  targetLang: string,
+): Promise<TranslationResult> {
+  const normalizedSourceLang = normalizeMyMemoryLanguageCode(sourceLang);
+  const normalizedTargetLang = normalizeMyMemoryLanguageCode(targetLang);
+
+  if (isSameLanguage(sourceLang, targetLang)) {
+    return {
+      translatedText: text,
+      status: "same-language",
+    };
+  }
+
+  try {
+    const endpoint = new URL(MYMEMORY_TRANSLATE_URL);
+    endpoint.searchParams.set("q", text);
+    endpoint.searchParams.set("langpair", `${normalizedSourceLang}|${normalizedTargetLang}`);
+    endpoint.searchParams.set("mt", "1");
+
+    const res = await fetch(endpoint, {
+      method: "GET",
+      signal: AbortSignal.timeout(7000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`MyMemory ${res.status}: ${body}`);
+    }
+
+    const json = (await res.json()) as MyMemoryTranslationResponse;
+    const translatedText = json.responseData?.translatedText?.trim();
+
+    if (typeof json.responseStatus === "number" && json.responseStatus !== 200) {
+      throw new Error(
+        json.responseDetails?.trim() || `MyMemory responded with status ${json.responseStatus}`,
+      );
+    }
+
+    if (!translatedText) {
+      throw new Error("No translatedText in MyMemory response");
+    }
+
+    return {
+      translatedText,
+      status: "translated",
+    };
+  } catch (err) {
+    logger.warn({ err, sourceLang, targetLang }, "MyMemory translation failed, returning original");
+    return {
+      translatedText: text,
+      status: "translation-error",
+      note:
+        err instanceof Error
+          ? err.message
+          : "MyMemory translation request failed. Showing the original transcript instead.",
+    };
+  }
+}
+
 async function translateText(
   text: string,
   sourceLang: string,
   targetLang: string,
 ): Promise<TranslationResult> {
+  if (isSameLanguage(sourceLang, targetLang)) {
+    return {
+      translatedText: text,
+      status: "same-language",
+    };
+  }
+
   if (AZURE_TRANSLATOR_KEY) {
     return translateWithAzure(text, sourceLang, targetLang);
   }
 
-  return translateWithLibreTranslate(text, sourceLang, targetLang);
+  if (LIBRETRANSLATE_URL) {
+    return translateWithLibreTranslate(text, sourceLang, targetLang);
+  }
+
+  return translateWithMyMemory(text, sourceLang, targetLang);
 }
 
 export const TRANSCRIPTION_PATH = "/ws/transcribe";
@@ -309,7 +466,7 @@ export function setupTranscription() {
 
         const trimmedName = name.trim();
         const normalizedTargetLang =
-          typeof targetLang === "string" && targetLang.trim() ? targetLang : "en";
+          typeof targetLang === "string" && targetLang.trim() ? targetLang.trim() : "en";
         const resolvedParticipantKey = getParticipantKey(participantKey, trimmedName);
         const nextClient: TranscribeClient = {
           ws,
@@ -366,21 +523,34 @@ export function setupTranscription() {
 
       if (msg.type === "settings") {
         if (typeof msg.targetLang === "string" && msg.targetLang.trim()) {
-          client.targetLang = msg.targetLang;
+          client.targetLang = msg.targetLang.trim();
         }
         return;
       }
 
       if (msg.type === "transcript") {
-        const { text, sourceLang = "en" } = msg;
+        const { text } = msg;
         if (!text || typeof text !== "string" || text.trim() === "") return;
 
         const room = getRoom(client.roomId);
         const original = text.trim();
+        const sourceLang =
+          typeof msg.sourceLang === "string" && msg.sourceLang.trim() ? msg.sourceLang.trim() : "en";
+        const translationsByTarget = new Map<string, Promise<TranslationResult>>();
 
         await Promise.all(
           room.map(async (peer) => {
-            const translation = await translateText(original, sourceLang, peer.targetLang);
+            const targetLang =
+              typeof peer.targetLang === "string" && peer.targetLang.trim() ? peer.targetLang.trim() : "en";
+            const translationKey = getTranslationCacheKey(targetLang);
+            let translationPromise = translationsByTarget.get(translationKey);
+
+            if (!translationPromise) {
+              translationPromise = translateText(original, sourceLang, targetLang);
+              translationsByTarget.set(translationKey, translationPromise);
+            }
+
+            const translation = await translationPromise;
 
             send(peer.ws, {
               type: "subtitle",
@@ -390,7 +560,7 @@ export function setupTranscription() {
               translationStatus: translation.status,
               translationNote: translation.note,
               sourceLang,
-              targetLang: peer.targetLang,
+              targetLang,
               ts: Date.now(),
             });
           }),
@@ -410,12 +580,14 @@ export function setupTranscription() {
     });
   });
 
-  logger.info(
-    {
-      provider: AZURE_TRANSLATOR_KEY ? "azure" : LIBRETRANSLATE_URL ? "libretranslate" : "none",
-      url: AZURE_TRANSLATOR_KEY ? AZURE_TRANSLATOR_ENDPOINT : LIBRETRANSLATE_URL || "not-configured",
-    },
-    "Transcription WebSocket ready at /ws/transcribe",
-  );
+  const provider = getActiveTranslationProvider();
+  const providerUrl =
+    provider === "azure"
+      ? AZURE_TRANSLATOR_ENDPOINT
+      : provider === "libretranslate"
+        ? LIBRETRANSLATE_URL
+        : MYMEMORY_TRANSLATE_URL;
+
+  logger.info({ provider, url: providerUrl }, "Transcription WebSocket ready at /ws/transcribe");
   return wss;
 }

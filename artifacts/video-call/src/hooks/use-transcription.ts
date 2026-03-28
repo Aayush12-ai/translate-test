@@ -4,6 +4,7 @@ import { resolveApiWebSocketCandidates } from "@/lib/utils";
 const TRANSCRIPTION_ACK_TIMEOUT_MS = 5_000;
 const TRANSCRIPTION_RECONNECT_DELAY_MS = 1_500;
 const TRANSCRIPTION_JOIN_RETRY_MS = 1_000;
+const TRANSCRIPTION_RESTART_DELAY_MS = 600;
 
 export type TranslationStatus =
   | "translated"
@@ -26,6 +27,7 @@ interface UseTranscriptionOptions {
   name: string;
   participantKey: string;
   enabled: boolean;
+  captureEnabled: boolean;
   sourceLang: string;
   targetLang: string;
   speechLang: string;
@@ -46,13 +48,15 @@ export function useTranscription({
   name,
   participantKey,
   enabled,
+  captureEnabled,
   sourceLang,
   targetLang,
   speechLang,
 }: UseTranscriptionOptions) {
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
   const [isListening, setIsListening] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [recognitionError, setRecognitionError] = useState<string | null>(null);
   const [isSocketReady, setIsSocketReady] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -60,6 +64,7 @@ export function useTranscription({
   const targetLangRef = useRef(targetLang);
   const languagePairRef = useRef<string | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const recognitionRestartTimerRef = useRef<number | null>(null);
 
   const addSubtitle = useCallback((subtitle: Omit<Subtitle, "id">) => {
     const id = ++subtitleIdCounter;
@@ -93,8 +98,11 @@ export function useTranscription({
         window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      setSubtitles([]);
-      setError(null);
+      if (!roomId || !name || !participantKey) {
+        setSubtitles([]);
+      }
+      setConnectionError(null);
+      setRecognitionError(null);
       setIsSocketReady(false);
       return;
     }
@@ -105,7 +113,7 @@ export function useTranscription({
       const socketUrl = socketCandidates[candidateIndex];
 
       if (!socketUrl) {
-        setError("Subtitle connection failed");
+        setConnectionError("Subtitle connection failed");
         return;
       }
 
@@ -181,7 +189,7 @@ export function useTranscription({
             window.clearTimeout(ackTimer);
             clearJoinRetryTimer();
             setIsSocketReady(true);
-            setError(null);
+            setConnectionError(null);
             return;
           }
           if (msg.type === "subtitle") {
@@ -209,7 +217,7 @@ export function useTranscription({
           return;
         }
 
-        setError("Subtitle connection failed");
+        setConnectionError("Subtitle connection failed");
       };
 
       ws.onclose = () => {
@@ -232,7 +240,7 @@ export function useTranscription({
           return;
         }
 
-        setError("Subtitle connection lost. Reconnecting...");
+        setConnectionError("Subtitle connection lost. Reconnecting...");
         reconnectTimerRef.current = window.setTimeout(() => {
           connectSocket(socketCandidates, 0);
         }, TRANSCRIPTION_RECONNECT_DELAY_MS);
@@ -271,44 +279,63 @@ export function useTranscription({
   }, [enabled, targetLang]);
 
   useEffect(() => {
-    if (!enabled || !isSocketReady) {
+    if (!enabled || !captureEnabled || !isSocketReady) {
+      if (recognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(recognitionRestartTimerRef.current);
+        recognitionRestartTimerRef.current = null;
+      }
       recognitionRef.current?.stop();
       recognitionRef.current = null;
       setIsListening(false);
+      setRecognitionError(null);
       return;
     }
 
     const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!SR) {
-      setError("Speech recognition is not supported in this browser. Try Chrome or Edge.");
+      setRecognitionError("Speech recognition is not supported in this browser. Try Chrome or Edge.");
       return;
     }
 
-    setError(null);
+    setRecognitionError(null);
 
     const recognition = new SR();
     recognition.continuous = true;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang = speechLang;
     recognitionRef.current = recognition;
 
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => {
       setIsListening(false);
-      if (enabled && recognitionRef.current === recognition) {
-        try {
-          recognition.start();
-        } catch {
-          // already started
+
+      if (enabled && captureEnabled && recognitionRef.current === recognition) {
+        if (recognitionRestartTimerRef.current !== null) {
+          window.clearTimeout(recognitionRestartTimerRef.current);
         }
+
+        recognitionRestartTimerRef.current = window.setTimeout(() => {
+          if (!enabled || !captureEnabled || recognitionRef.current !== recognition) {
+            recognitionRestartTimerRef.current = null;
+            return;
+          }
+
+          try {
+            recognition.start();
+          } catch {
+            // ignore if already started
+          } finally {
+            recognitionRestartTimerRef.current = null;
+          }
+        }, TRANSCRIPTION_RESTART_DELAY_MS);
       }
     };
 
     recognition.onerror = (e) => {
       if (e.error === "not-allowed") {
-        setError("Microphone permission denied. Please allow mic access and try again.");
+        setRecognitionError("Microphone permission denied. Please allow mic access and try again.");
       } else if (e.error !== "no-speech" && e.error !== "aborted") {
-        setError(`Speech recognition error: ${e.error}`);
+        setRecognitionError(`Speech recognition error: ${e.error}`);
       }
     };
 
@@ -332,14 +359,23 @@ export function useTranscription({
     }
 
     return () => {
+      if (recognitionRestartTimerRef.current !== null) {
+        window.clearTimeout(recognitionRestartTimerRef.current);
+        recognitionRestartTimerRef.current = null;
+      }
       recognition.onend = null;
       recognition.stop();
       recognitionRef.current = null;
       setIsListening(false);
     };
-  }, [enabled, isSocketReady, speechLang, sourceLang]);
+  }, [enabled, captureEnabled, isSocketReady, speechLang, sourceLang]);
 
   const clearSubtitles = useCallback(() => setSubtitles([]), []);
 
-  return { subtitles, isListening, error, clearSubtitles };
+  return {
+    subtitles,
+    isListening,
+    error: connectionError ?? recognitionError,
+    clearSubtitles,
+  };
 }
