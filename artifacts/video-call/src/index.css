@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: 'Inter', sans-serif;
-  --font-display: 'Outfit', sans-serif;
+  --font-sans: "Manrope", sans-serif;
+  --font-display: "Sora", sans-serif;
 
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
@@ -28,47 +28,100 @@
   --radius: 1rem;
 }
 
-/* Enforce Dark Mode Only for this Professional Theme */
 :root {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  
-  --card: 240 10% 3.9%;
-  --card-foreground: 0 0% 98%;
-  
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 217.2 91.2% 59.8%;
+  --background: 44 45% 97%;
+  --foreground: 220 31% 14%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 220 31% 14%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 31% 14%;
+
+--primary: 160 75% 40%;
+  --primary-foreground: 0 0% 100%;
+  --union-gold: 40 90% 55%;
+  --union-gold-foreground: 30 80% 15%;
+
+  --secondary: 206 44% 95%;
+  --secondary-foreground: 220 31% 14%;
+
+  --muted: 204 38% 94%;
+  --muted-foreground: 215 16% 40%;
+
+  --accent: 192 80% 92%;
+  --accent-foreground: 210 38% 17%;
+
+  --destructive: 4 80% 57%;
+  --destructive-foreground: 0 0% 100%;
+
+  --border: 204 30% 87%;
+  --input: 204 30% 87%;
+  --ring: 194 87% 42%;
+}
+
+.dark {
+  --background: 221 45% 8%;
+  --foreground: 210 33% 96%;
+
+  --card: 221 39% 12%;
+  --card-foreground: 210 33% 96%;
+
+  --popover: 221 39% 12%;
+  --popover-foreground: 210 33% 96%;
+
+  --primary: 191 96% 63%;
+  --primary-foreground: 221 46% 9%;
+
+  --secondary: 221 30% 18%;
+  --secondary-foreground: 210 33% 96%;
+
+  --muted: 221 24% 18%;
+  --muted-foreground: 214 16% 70%;
+
+  --accent: 220 28% 16%;
+  --accent-foreground: 210 33% 96%;
+
+  --destructive: 0 68% 53%;
+  --destructive-foreground: 210 33% 96%;
+
+  --border: 221 22% 23%;
+  --input: 221 22% 23%;
+  --ring: 191 96% 63%;
 }
 
 @layer base {
   * {
     @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground antialiased selection:bg-primary/30;
-    font-feature-settings: "rlig" 1, "calt" 1;
+
+  html {
+    scroll-behavior: smooth;
   }
-  
-  h1, h2, h3, h4, h5, h6 {
+
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary/20;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  background-image:
+      radial-gradient(circle at 12% 18%, rgba(0, 165, 80, 0.14), transparent 28%),
+      radial-gradient(circle at 84% 8%, rgba(34, 197, 94, 0.12), transparent 30%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.7), transparent 22%);
+    background-attachment: fixed;
+  }
+
+  .dark body {
+    background-image:
+    radial-gradient(circle at 16% 18%, rgba(0, 165, 80, 0.14), transparent 28%),
+      radial-gradient(circle at 84% 10%, rgba(34, 197, 94, 0.16), transparent 32%),
+      linear-gradient(180deg, rgba(10, 18, 33, 0.96), rgba(10, 18, 33, 0.94));
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-display);
     @apply tracking-tight;
   }
@@ -76,14 +129,30 @@
 
 @layer utilities {
   .glass-panel {
-    @apply bg-background/60 backdrop-blur-xl border border-white/10 shadow-2xl;
+    @apply border border-white/40 bg-white/70 backdrop-blur-xl shadow-[0_30px_80px_rgba(15,23,42,0.12)] dark:border-white/10 dark:bg-slate-950/45 dark:shadow-[0_26px_80px_rgba(2,8,23,0.42)];
   }
-  
+
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-br from-white to-white/60;
+    @apply bg-[linear-gradient(135deg,#006633_10%,#00A550_55%,#D4AF37_100%)] bg-clip-text text-transparent dark:bg-[linear-gradient(135deg,#90EE90_10%,#32CD32_55%,#FFD700_100%)];
   }
-  
+
+  .card-nav-text {
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4), 0 0 4px rgba(255,255,255,0.8);
+  }
+
   .text-gradient-primary {
-    @apply bg-clip-text text-transparent bg-gradient-to-br from-blue-400 to-indigo-500;
+    @apply bg-[linear-gradient(135deg,#0f172a_10%,#0284c7_45%,#0d9488_100%)] bg-clip-text text-transparent dark:bg-[linear-gradient(135deg,#f8fafc_10%,#38bdf8_45%,#2dd4bf_100%)];
+  }
+
+  .mesh-surface {
+    background-image:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(240, 249, 255, 0.9)),
+      radial-gradient(circle at top right, rgba(14, 165, 233, 0.18), transparent 34%);
+  }
+
+  .dark .mesh-surface {
+    background-image:
+      linear-gradient(135deg, rgba(15, 23, 42, 0.88), rgba(6, 14, 28, 0.92)),
+      radial-gradient(circle at top right, rgba(34, 211, 238, 0.18), transparent 36%);
   }
 }

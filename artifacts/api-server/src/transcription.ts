@@ -19,6 +19,8 @@ interface TranslationResult {
   translatedText: string;
   status: TranslationStatus;
   note?: string;
+  provider?: TranslationProvider;
+  fallbackFrom?: TranslationProviderFailure;
 }
 
 const rooms = new Map<string, TranscribeClient[]>();
@@ -67,6 +69,10 @@ const AZURE_TRANSLATOR_REGION = process.env["AZURE_TRANSLATOR_REGION"]?.trim() ?
 const AZURE_TRANSLATOR_CATEGORY = process.env["AZURE_TRANSLATOR_CATEGORY"]?.trim() ?? "";
 
 type TranslationProvider = "azure" | "libretranslate" | "mymemory";
+type TranslationProviderFailure = {
+  provider: TranslationProvider;
+  error: string;
+};
 
 interface AzureTranslationResponseItem {
   translations?: Array<{
@@ -207,6 +213,7 @@ async function translateWithAzure(
   text: string,
   sourceLang: string,
   targetLang: string,
+  options: { throwOnError?: boolean } = {},
 ): Promise<TranslationResult> {
   const normalizedSourceLang = normalizeAzureLanguageCode(sourceLang);
   const normalizedTargetLang = normalizeAzureLanguageCode(targetLang);
@@ -259,9 +266,14 @@ async function translateWithAzure(
     return {
       translatedText,
       status: "translated",
+      provider: "azure",
     };
   } catch (err) {
     logger.warn({ err, sourceLang, targetLang }, "Azure translation failed, returning original");
+    if (options.throwOnError) {
+      throw err;
+    }
+
     return {
       translatedText: text,
       status: "translation-error",
@@ -277,6 +289,7 @@ async function translateWithLibreTranslate(
   text: string,
   sourceLang: string,
   targetLang: string,
+  options: { throwOnError?: boolean } = {},
 ): Promise<TranslationResult> {
   const normalizedSourceLang = normalizeLibreTranslateLanguageCode(sourceLang);
   const normalizedTargetLang = normalizeLibreTranslateLanguageCode(targetLang);
@@ -322,9 +335,14 @@ async function translateWithLibreTranslate(
     return {
       translatedText: json.translatedText,
       status: "translated",
+      provider: "libretranslate",
     };
   } catch (err) {
     logger.warn({ err, sourceLang, targetLang }, "Translation failed, returning original");
+    if (options.throwOnError) {
+      throw err;
+    }
+
     return {
       translatedText: text,
       status: "translation-error",
@@ -340,6 +358,7 @@ async function translateWithMyMemory(
   text: string,
   sourceLang: string,
   targetLang: string,
+  options: { throwOnError?: boolean } = {},
 ): Promise<TranslationResult> {
   const normalizedSourceLang = normalizeMyMemoryLanguageCode(sourceLang);
   const normalizedTargetLang = normalizeMyMemoryLanguageCode(targetLang);
@@ -383,9 +402,14 @@ async function translateWithMyMemory(
     return {
       translatedText,
       status: "translated",
+      provider: "mymemory",
     };
   } catch (err) {
     logger.warn({ err, sourceLang, targetLang }, "MyMemory translation failed, returning original");
+    if (options.throwOnError) {
+      throw err;
+    }
+
     return {
       translatedText: text,
       status: "translation-error",
@@ -409,15 +433,60 @@ async function translateText(
     };
   }
 
+  const failures: TranslationProviderFailure[] = [];
+
   if (AZURE_TRANSLATOR_KEY) {
-    return translateWithAzure(text, sourceLang, targetLang);
+    try {
+      return await translateWithAzure(text, sourceLang, targetLang, {
+        throwOnError: true,
+      });
+    } catch (err) {
+      failures.push({
+        provider: "azure",
+        error:
+          err instanceof Error
+            ? err.message
+            : "Azure translation request failed.",
+      });
+    }
   }
 
   if (LIBRETRANSLATE_URL) {
-    return translateWithLibreTranslate(text, sourceLang, targetLang);
+    try {
+      const result = await translateWithLibreTranslate(text, sourceLang, targetLang, {
+        throwOnError: true,
+      });
+      return failures[0] ? { ...result, fallbackFrom: failures[0] } : result;
+    } catch (err) {
+      failures.push({
+        provider: "libretranslate",
+        error:
+          err instanceof Error
+            ? err.message
+            : "LibreTranslate request failed.",
+      });
+    }
   }
 
-  return translateWithMyMemory(text, sourceLang, targetLang);
+  try {
+    const result = await translateWithMyMemory(text, sourceLang, targetLang, {
+      throwOnError: true,
+    });
+    return failures[0] ? { ...result, fallbackFrom: failures[0] } : result;
+  } catch (err) {
+    const fallbackError =
+      err instanceof Error ? err.message : "MyMemory translation request failed.";
+    const primaryFailure = failures[0];
+
+    return {
+      translatedText: text,
+      status: "translation-error",
+      note: primaryFailure
+        ? `${primaryFailure.provider} failed (${primaryFailure.error}); fallback also failed (${fallbackError}).`
+        : fallbackError,
+      fallbackFrom: primaryFailure,
+    };
+  }
 }
 
 export const TRANSCRIPTION_PATH = "/ws/transcribe";
@@ -558,7 +627,11 @@ export function setupTranscription() {
               original,
               translated: translation.translatedText,
               translationStatus: translation.status,
-              translationNote: translation.note,
+              translationNote:
+                translation.note ??
+                (translation.fallbackFrom
+                  ? `${translation.fallbackFrom.provider} was unavailable, so a fallback translator was used.`
+                  : undefined),
               sourceLang,
               targetLang,
               ts: Date.now(),

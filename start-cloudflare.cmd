@@ -67,7 +67,11 @@ start "api-server" /D "%CD%\artifacts\api-server" cmd /k "set PORT=%API_PORT% &&
 start "video-call" /D "%CD%\artifacts\video-call" cmd /k "set PORT=%WEB_PORT% && set API_PROXY_TARGET=%API_PROXY_TARGET% && npm.cmd run dev"
 
 echo Waiting for the frontend to come up before opening Cloudflare Tunnel...
-timeout /t 4 /nobreak >nul
+call :wait_for_port 127.0.0.1 %WEB_PORT% 20
+if errorlevel 1 (
+  echo [WARN] Frontend was not reachable at http://127.0.0.1:%WEB_PORT% after 20 seconds.
+  echo [WARN] Cloudflare Tunnel may show origin errors until the frontend finishes starting.
+)
 
 echo.
 echo Frontend: http://localhost:%WEB_PORT%
@@ -75,7 +79,8 @@ echo API health: http://127.0.0.1:%API_PORT%/api/healthz
 echo.
 echo A new terminal will open for Cloudflare Tunnel.
 echo Copy the https://*.trycloudflare.com URL from that window and open it on your other devices.
-start "cloudflare-tunnel" /D "%CD%" cmd /k "\"%CLOUDFLARED_CMD%\" tunnel --protocol http2 --url http://localhost:%WEB_PORT%"
+echo Tunnel target: http://127.0.0.1:%WEB_PORT%
+start "cloudflare-tunnel" /D "%CD%" cmd /k "\"%CLOUDFLARED_CMD%\" tunnel --protocol http2 --url http://127.0.0.1:%WEB_PORT%"
 
 echo.
 echo Close the three opened terminal windows to stop the app and tunnel.
@@ -103,3 +108,23 @@ if errorlevel 1 (
 
 shift
 goto choose_port_loop
+
+:wait_for_port
+setlocal EnableExtensions
+set "target_host=%~1"
+set "target_port=%~2"
+set "remaining_attempts=%~3"
+
+:wait_for_port_loop
+powershell -NoProfile -Command "exit ([int] -not (Test-NetConnection -ComputerName '%target_host%' -Port %target_port% -WarningAction SilentlyContinue).TcpTestSucceeded)" >nul 2>nul
+if not errorlevel 1 (
+  endlocal & exit /b 0
+)
+
+set /a remaining_attempts-=1
+if %remaining_attempts% LEQ 0 (
+  endlocal & exit /b 1
+)
+
+timeout /t 1 /nobreak >nul
+goto wait_for_port_loop
