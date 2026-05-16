@@ -66,6 +66,7 @@ function Router() {
         )}
       />
       <Route path="/chat" component={DashboardRedirect} />
+      <Route path="/schedule" component={DashboardRedirect} />
       <Route path="/join/:roomId" component={Join} />
       <Route path="/call/:roomId" component={Call} />
       <Route path="/call" component={DashboardRedirect} />

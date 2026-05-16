@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import { CardNav } from "@/components/card-nav";
 import {
   ArrowRight,
+  CalendarDays,
   Languages,
   Lock,
   LogIn,
@@ -14,7 +15,6 @@ import {
   SunMedium,
   Video,
 } from "lucide-react";
-
 
 type AppLanguage = "en" | "hi";
 
@@ -30,7 +30,8 @@ const COPY = {
       adminDesc: "Open the admin dashboard",
       chat: "AI Chat",
       chatDesc: "Image analysis assistant",
-
+      schedule: "Schedule",
+      scheduleDesc: "Book appointments",
     },
     controls: {
       language: "Language",
@@ -47,6 +48,7 @@ const COPY = {
       helperText:
         "Use email/password today, or enable Google OAuth from the server config for one-click sign-in.",
       chatLink: "Open AI Chat",
+      scheduleLink: "Book Appointment",
       stats: [
         "Live translated video calls",
         "Groq AI image insights",
@@ -79,7 +81,8 @@ const COPY = {
       adminDesc: "Admin dashboard kholein",
       chat: "AI Chat",
       chatDesc: "Image analysis assistant",
-
+      schedule: "Schedule",
+      scheduleDesc: "Appointment book karein",
     },
     controls: {
       language: "Bhasha",
@@ -166,7 +169,13 @@ export function Home() {
         icon: Sparkles,
         href: "/chat",
       },
-
+      {
+        id: "schedule",
+        title: copy.nav.schedule,
+        description: copy.nav.scheduleDesc,
+        icon: CalendarDays,
+        href: "/schedule",
+      },
     ],
     [copy],
   );
@@ -302,7 +311,12 @@ export function Home() {
               <Link href="/chat" className="font-semibold text-primary hover:underline">
                 {copy.hero.chatLink}
               </Link>
-
+              <Link
+                href="/schedule"
+                className="font-semibold text-primary hover:underline"
+              >
+                {copy.hero.scheduleLink}
+              </Link>
             </div>
 
             <div className="grid gap-6 sm:grid-cols-3">
